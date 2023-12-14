@@ -1,5 +1,6 @@
 #include <iostream>
 #include <stdio.h>
+#include <math.h>
 
 // Output in P6 format, a binary file containing:
 // P6
@@ -66,16 +67,49 @@ struct RGB {
 struct vec3 {
     float x,y,z;
 
-    vec3() {
-        x = 0.0;
-        y = 0.0;
-        z = 0.0;
+    vec3(float x = 0.0f, float y = 0.0f, float z = 0.0f) {
+        x = x;
+        y = y;
+        z = z;
     }
+
+    float norm () {
+        return sqrtf(powf(x, 2.0f) + powf(y, 2.0) + powf(z, 2.0f));
+    }
+
+    vec3 operator*(float scalar) {
+        return vec3(x * scalar, y*scalar, z * scalar);
+    }
+
+    vec3 operator+(vec3 vector) {
+        return vec3(x+vector.x, y+vector.y, z+vector.z);
+    }
+
+    vec3 operator-(vec3 vector) {
+        return vec3(x-vector.x, y-vector.y, z-vector.z);
+    }
+
+    vec3 unit() {
+        float len = norm();
+        return vec3{x/len, y/len, z/len};
+    }
+
+    /**
+     * @brief Dot product of this vector and parameter vector
+     * 
+     * @param vector 
+     * @return float 
+     */
+    float dot(vec3 vector) {
+        return x * vector.x + y * vector.y + z * vector.z;
+    }
+
 };
 
 struct Sphere {
-    vec3 scale;
+    vec3 scale {1.0, 1.0, 1.0};
     vec3 position;
+    float radius;
     float matrix[4][4];
 
     Sphere(vec3 scale, vec3 position) {
@@ -89,43 +123,70 @@ struct Sphere {
     }
 };
 
-struct vec4 {
-    float x,y,z,w;
+// struct vec4 {
+//     float x,y,z,w;
 
-    vec4() {
-        x = 0.0;
-        y = 0.0;
-        z = 0.0;
-        w = 0.0;
-    }
-};
+//     vec4(float x = 0.0, float y = 0.0, float z = 0.0, float w = 0.0) {
+//         x = 0.0;
+//         y = 0.0;
+//         z = 0.0;
+//         w = 0.0;
+//     }
+// };
 
 struct Ray {
-    vec4 direction;
+private:
+    // Ensure direction is private so it can only be set by the setter (ensuring unit length)
+    vec3 direction;
+public:
     vec3 startingPoint;
-    float testIntersection(Sphere* sphere) {
+
+    Ray(vec3 rayDirection, vec3 rayStartingPoint) {
+        direction = rayDirection;
+        startingPoint = rayStartingPoint;
+    }
+
+    void setDirection(vec3 dir) {
+        direction = dir.unit();
+    }
+
+    vec3 getDirection() {
+        return direction;
+    }
+
+    struct IntersectResult {
+        bool intersect = false;
+        vec3 pointOfIntersection1;
+        vec3 pointOfIntersection2;
+    };
+
+    IntersectResult testIntersection(Sphere* sphere) {
         /* 
-            Intersection of a plane sphere is simple, we are
-            simply looking for where the distance from the ray to
-            the center of the circle is exactly r
 
-            We are solving for a t value such that dist(ray(t), sphereCentre) = r
-            ray(t)_x = dir_x * t + start_x
-            ray(t)_y = dir_y * t + start_y
-            ray(t)_z = dir_z * t + start_z
-
-            length(ray(t) - sphereCentre) = r
-            (ray(t)_x - centre_x)^2 + (ray(t)_y - centre_y)^2 + (ray(t)_z - centre_z)^2 = r^2
-            ray(t)_x
-
-
-
+            Solve ray/sphere intersection quadratic:
+            a = |dir|^2
+            b = 2dir(startingPoint - sphereCentre)
+            c = |startingPoint - sphereCentre|^2 - radius^2
         */
-
        
-       
+        // Unit direction vector
+        float a = 1;
+        float b = (direction * 2.0f).dot(startingPoint - sphere->position);
+        float c = powf((startingPoint - sphere->position).norm(), 2.f) - powf(sphere->radius, 2.f);
 
+        float det = -powf(b, 2.0) - 4 * a * c;
 
+        IntersectResult result;
+        if (det >= 0.0f) {
+            float root1 = (-b + sqrtf(det)) / (2.0 * a);
+            float root2 = (-b - sqrtf(det)) / (2.0 * a);
+
+            result.intersect = true;
+            result.pointOfIntersection1 = startingPoint + direction * root1;
+            result.pointOfIntersection2 = startingPoint + direction * root2;
+        }
+
+        return result;
 
     }
 };
@@ -153,7 +214,9 @@ void setPixel(unsigned char* image, int x, int y, RGB colour, int width, int hei
 // You should get rid of this code, and just paste the save_imageXX functions into your
 // raytrace.cpp code. 
 int main() {
-    Sphere test = Sphere{vec3{1.0f, 1.0f, 1.0f}, vec3{}}
+    vec3 sphereScale = { 1.0, 1.0, 1.0 };
+    vec3 position = {0.0, 0.0, 0.0};
+    Sphere test{sphereScale, position};
 
 	int Width = 128;	// Move these to your setup function. The actual resolution will be
 	int Height= 128;	// specified in the input file
@@ -162,16 +225,24 @@ int main() {
 	unsigned char *pixels;
 	// This will be your image. Note that pixels[0] is the top left of the image and
 	// pixels[3*Width*Height-1] is the bottom right of the image.
-    pixels = new unsigned char [3*Width*Height];
+    pixels = new unsigned char [3*Width*Height]{0};
 
-    RGB col = {0.0, 1.0, 0.0};
+    RGB col = {1.0, 0.0, 0.0};
     setPixel(pixels, 24, 50, col, 128, 128);
 
 	save_imageP3(Width, Height, fname3, pixels);
 	save_imageP6(Width, Height, fname6, pixels);
+
+    vec3 dir = {1, 1, 1};
+    Ray testRay{dir, vec3{0, 0, 0}};
+
+    Ray::IntersectResult intersect = testRay.testIntersection(&test);
+
+
+    float c = 3;
 }
 
 // Trace ray returns rgb colour data
 vec3 traceRay(Ray start) {
-
+    return vec3{0.0, 0.0, 0.0};
 }
