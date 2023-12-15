@@ -97,6 +97,13 @@ struct vec3 {
        return vec3{x * vector.x, y * vector.y, z * vector.z};
     }
 
+    vec3 clampAll(float min, float max) {
+        if (x > max) x = max; else if (x < min) x = min;
+        if (y > max) y = max; else if (y < min) y = min;
+        if (z > max) z = max; else if (z < min) z = min;
+        return vec3{x,y,z};
+    }
+
 
     /**
      * @brief Dot product of this vector and parameter vector
@@ -168,7 +175,7 @@ public:
     vec3 startingPoint;
 
     Ray(vec3 rayDirection, vec3 rayStartingPoint) {
-        direction = rayDirection;
+        direction = rayDirection.unit();
         startingPoint = rayStartingPoint;
     }
 
@@ -297,13 +304,13 @@ Ray pixelToWorldRay(vec2 pixel) {
     // Determine the centre of the pixel in view space:
 
     // Confusingly, y-axis is the horizontal (pos y left), and x-axis (pos x up) is the vertical
-    float pixDY = (right - left) / res.x;
-    float pixDX = (top - bottom) / res.y;
+    float pixDX = (right - left) / res.x;
+    float pixDY = (top - bottom) / res.y;
 
     // We subtract half the length/height of the pixel to get to the centre
     float halfPixDY = pixDY / 2.f, halfPixDX = pixDX / 2.f;
 
-    vec3 pixelCentre{top - (pixDX * pixel.y) - halfPixDX, right - (pixDY * pixel.x) - halfPixDY, -near};
+    vec3 pixelCentre{left + (pixDX * pixel.x) - halfPixDX, top - (pixDY * pixel.y) - halfPixDY, -near};
 
     return Ray(pixelCentre - cameraOrigin, cameraOrigin);
 }
@@ -410,7 +417,7 @@ vec3 traceRay(Ray ray, int remainingBounces) {
         vec3 reflectedColour{0.f, 0.f, 0.f};
         if (remainingBounces > 0) {
             Ray newRay {closestResult.intersectionNormal, closestResult.closestIntersection};
-            reflectedColour = traceRay(newRay, remainingBounces - 1) * closestResult.intersectedSphere.k_r;
+            //reflectedColour = traceRay(newRay, remainingBounces - 1) * closestResult.intersectedSphere.k_r;
         }
         return  localColour + reflectedColour;
 
@@ -471,6 +478,7 @@ int main(int argc,  char **argv) {
             Ray worldRay = pixelToWorldRay({x,y});
             setPixel(pixels, x, y, traceRay(worldRay, bounceCount), res.x, res.y);
         }
+        int i = y;
     }
 
     save_imageP3(Width, Height, fname3, pixels);
