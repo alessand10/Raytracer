@@ -1,6 +1,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <math.h>
+#include <vector>
 
 // Output in P6 format, a binary file containing:
 // P6
@@ -67,32 +68,27 @@ struct RGB {
 struct vec3 {
     float x,y,z;
 
-    vec3(float x = 0.0f, float y = 0.0f, float z = 0.0f) {
-        x = x;
-        y = y;
-        z = z;
-    }
-
     float norm () {
         return sqrtf(powf(x, 2.0f) + powf(y, 2.0) + powf(z, 2.0f));
     }
 
     vec3 operator*(float scalar) {
-        return vec3(x * scalar, y*scalar, z * scalar);
+        return vec3{x * scalar, y*scalar, z * scalar};
     }
 
     vec3 operator+(vec3 vector) {
-        return vec3(x+vector.x, y+vector.y, z+vector.z);
+        return vec3{x+vector.x, y+vector.y, z+vector.z};
     }
 
     vec3 operator-(vec3 vector) {
-        return vec3(x-vector.x, y-vector.y, z-vector.z);
+        return vec3{x-vector.x, y-vector.y, z-vector.z};
     }
 
     vec3 unit() {
         float len = norm();
         return vec3{x/len, y/len, z/len};
     }
+
 
     /**
      * @brief Dot product of this vector and parameter vector
@@ -103,36 +99,48 @@ struct vec3 {
     float dot(vec3 vector) {
         return x * vector.x + y * vector.y + z * vector.z;
     }
-
 };
 
+struct vec2 {
+    float x,y;
+};
+
+// In local space all spheres are unit size
 struct Sphere {
     vec3 scale {1.0, 1.0, 1.0};
-    vec3 position;
-    float radius;
+    vec3 position{0.0f, 0.0f, 0.0f};
+    float radius = 1.f;
     float matrix[4][4];
 
-    Sphere(vec3 scale, vec3 position) {
+    Sphere(vec3 scale, vec3 posIn) {
         matrix[0][0] = scale.x;
         matrix[1][1] = scale.y;
         matrix[2][2] = scale.z;
-        matrix[0][3] = position.x;
-        matrix[1][3] = position.y;
-        matrix[2][3] = position.z;
+        matrix[0][3] = posIn.x;
+        matrix[1][3] = posIn.y;
+        matrix[2][3] = posIn.z;
         matrix[3][3] = 1.0;
+        position = posIn;
     }
+
+    /**
+     * @brief Given a (assumed) world space intersection
+     * with this sphere, returns the normal vector
+     * 
+     * @param intersectWS 
+     * @return vec3 
+     */
+    vec3 getNormalFromIntersect(vec3 intersectWS) {
+        return (intersectWS - position).unit();
+    }
+
 };
 
-// struct vec4 {
-//     float x,y,z,w;
+struct LightSource {
+    vec3 location;
+    vec3 intensity;
+};
 
-//     vec4(float x = 0.0, float y = 0.0, float z = 0.0, float w = 0.0) {
-//         x = 0.0;
-//         y = 0.0;
-//         z = 0.0;
-//         w = 0.0;
-//     }
-// };
 
 struct Ray {
 private:
@@ -156,8 +164,13 @@ public:
 
     struct IntersectResult {
         bool intersect = false;
-        vec3 pointOfIntersection1;
-        vec3 pointOfIntersection2;
+        // Intersection in world space
+        vec3 closestIntersection;
+        // The t value r(t) for the nearest intersection. Used for
+        // depth comparisons 
+        float closestTValue;
+        // Intersection normal in world space
+        vec3 intersectionNormal;
     };
 
     IntersectResult testIntersection(Sphere* sphere) {
@@ -170,20 +183,49 @@ public:
         */
        
         // Unit direction vector
-        float a = 1;
-        float b = (direction * 2.0f).dot(startingPoint - sphere->position);
-        float c = powf((startingPoint - sphere->position).norm(), 2.f) - powf(sphere->radius, 2.f);
+        float radius = 1.0f;
+        float a = direction.norm();
+        float b = ((startingPoint - sphere->position) * 2.f).dot(direction);
+        float c = powf((startingPoint - sphere->position).norm(), 2.f) - powf(radius, 2.f);
 
-        float det = -powf(b, 2.0) - 4 * a * c;
+        float det = powf(b, 2.0) - 4 * a * c;
 
         IntersectResult result;
         if (det >= 0.0f) {
             float root1 = (-b + sqrtf(det)) / (2.0 * a);
             float root2 = (-b - sqrtf(det)) / (2.0 * a);
 
+            // Prematurely set to true, only set to false if both roots are negative (ray intersects backwards only)
             result.intersect = true;
-            result.pointOfIntersection1 = startingPoint + direction * root1;
-            result.pointOfIntersection2 = startingPoint + direction * root2;
+
+            // two t's greater than or equal to zero, choose closest 
+            if (root2 > 0.0f && root1 > 0.0f) {
+                if (root1 < root2) {
+                    result.closestIntersection = startingPoint + direction * root1;
+                    result.closestTValue = root1;
+                }
+                else {
+                    result.closestIntersection = startingPoint + direction * root2;
+                    result.closestTValue = root2;
+                }
+                
+            }
+            else if (root2 > 0.0f) {
+                result.closestIntersection = startingPoint + direction * root2;
+                result.closestTValue = root2;
+            }
+            else if (root1 > 0.0f) {
+                result.closestIntersection = startingPoint + direction * root1;
+                result.closestTValue = root1;
+            }
+            else {
+                result.intersect = false;
+            }
+
+            // If an intersection occurred, determine the normal of the sphere
+            if (result.intersect) {
+                result.intersectionNormal = sphere->getNormalFromIntersect(result.closestIntersection);
+            }
         }
 
         return result;
@@ -209,17 +251,53 @@ void setPixel(unsigned char* image, int x, int y, RGB colour, int width, int hei
     image[pixelIndex + 2] = colour.b * 255.0;
 }
 
+float near = 1, left = 1, right = -1, bottom = -1, top = 1;
+vec2 res{512, 512};
 
-// This main function is meant only to illustrate how to use the save_imageXX functions.
-// You should get rid of this code, and just paste the save_imageXX functions into your
-// raytrace.cpp code. 
+// For this project, the camera is fixed at the origin
+// and looking down the -z axis
+const vec3 cameraOrigin{0.f, 0.f, 0.f};
+
+/**
+ * @brief Creates a ray corresponding to a single pixel in world space
+ * starting from the observer and passing through the centre of the
+ * desired pixel.
+ * 
+ * @note pixel [0,0] is the top left [res.x, res.y] is the bottom right.
+ * 
+ * @param pixel 
+ * @return Ray 
+ */
+Ray pixelToWorldRay(vec2 pixel) {
+    // Determine ray in view space before undoing view transform
+    // The ray starts at the observer who is at the origin of the world
+    vec3 origin = {0.0f, 0.0f, 0.0f};
+
+    // Determine the centre of the pixel in view space:
+
+    // Confusingly, y-axis is the horizontal (pos y left), and x-axis (pos x up) is the vertical
+    float pixDY = (left - right) / res.x;
+    float pixDX = (top - bottom) / res.y;
+
+    // We subtract half the length/height of the pixel to get to the centre
+    float halfPixDY = pixDY / 2.f, halfPixDX = pixDX / 2.f;
+
+    vec3 pixelCentre{top - (pixDX * pixel.y) - halfPixDX, left - (pixDY * pixel.x) - halfPixDY, -near};
+
+    return Ray(pixelCentre - cameraOrigin, cameraOrigin);
+}
+
+std::vector<Sphere> spheres = {};
+std::vector<LightSource> lightSources = {};
+
 int main() {
-    vec3 sphereScale = { 1.0, 1.0, 1.0 };
-    vec3 position = {0.0, 0.0, 0.0};
+    vec3 sphereScale{ 1.0f, 1.0f, 1.0f};
+    vec3 position{0.0f, 0.0f, -5.0f};
     Sphere test{sphereScale, position};
+    spheres.push(test);
 
-	int Width = 128;	// Move these to your setup function. The actual resolution will be
-	int Height= 128;	// specified in the input file
+	int Width = res.x;	// Move these to your setup function. The actual resolution will be
+	int Height= res.y;	// specified in the input file
     char fname3[20] = "sceneP3.ppm"; //This should be set based on the input file
 	char fname6[20] = "sceneP6.ppm"; //This should be set based on the input file
 	unsigned char *pixels;
@@ -228,21 +306,102 @@ int main() {
     pixels = new unsigned char [3*Width*Height]{0};
 
     RGB col = {1.0, 0.0, 0.0};
-    setPixel(pixels, 24, 50, col, 128, 128);
 
-	save_imageP3(Width, Height, fname3, pixels);
+    vec3 dir = {1, 0.0, 0};
+    vec3 loc = {-1, 0.75, 0};
+    Ray testRay{dir, loc};
+    
+    Ray::IntersectResult intersect = testRay.testIntersection(&test);
+    
+    for (float y = 0 ; y < res.x ; y ++) {
+        for (float x = 0 ; x < res.y ; x++) {
+            Ray worldRay = pixelToWorldRay({x,y});
+            if (worldRay.testIntersection(&test).intersect)
+                setPixel(pixels, x, y, {0.5, 0.1, 0.1}, res.x, res.y);
+        }
+    }
+
+    save_imageP3(Width, Height, fname3, pixels);
 	save_imageP6(Width, Height, fname6, pixels);
 
-    vec3 dir = {1, 1, 1};
-    Ray testRay{dir, vec3{0, 0, 0}};
-
-    Ray::IntersectResult intersect = testRay.testIntersection(&test);
-
-
-    float c = 3;
+    return 0;
 }
 
-// Trace ray returns rgb colour data
-vec3 traceRay(Ray start) {
-    return vec3{0.0, 0.0, 0.0};
+/**
+ * @brief Fires a ray that tests for intersection against all spheres
+ * in the scene.
+ * 
+ * @param ray 
+ * @return Ray::IntersectResult 
+ */
+Ray::IntersectResult hitTestAllSpheres(Ray ray) {
+    Ray::IntersectResult closestResult;
+    // Determine ray intersection result
+    for (int i = 0 ; i < spheres.size() ; i++) {
+        int closestIntersectIndex = -1;
+
+        // Setting this to 0 is okay as long as we factor in if an intersection has been found^
+        float closestT = 0.0f;
+
+        Ray::IntersectResult result = ray.testIntersection(spheres[i]);
+        if (result.intersect){
+            // If there hasn't been an intersection yet (closestIntersectIndex == -1) or we found
+            // a closer intersection (result.closestTValue < closestT)
+            if (closestIntersectIndex == -1 || result.closestTValue < closestT) {
+                closestIntersectIndex = i;
+                closestT = result.closestTValue;
+                closestResult = result;
+            }
+        }
+    }
 }
+
+/**
+ * @brief Compute the phong illumination model for single light source
+ * 
+ * @param V 
+ * @param N 
+ * @param L 
+ * @return vec3 
+ */
+vec3 computePhongModel(vec3 V, vec3 N, vec3 L) {
+
+}
+
+
+// Compute the lighting by firing shadow rays to all light sources,
+// if there is an unoccluded hit, then use computePhongModel to find their contribution
+vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal) {
+
+}
+
+/**
+ * @brief Recursively trace light rays.
+ * 
+ * @param ray The ray being traced
+ * @param prevBounceSphereIndex The index of the sphere which this ray has reflected from. -1 if initial ray
+ * @param remainingBounces The number of bounces remaining
+ * @return vec3 
+ */
+vec3 traceRay(Ray ray, int remainingBounces) {
+    // Each bounce triggers a recursive call
+
+    Ray::IntersectResult closestResult = hitTestAllSpheres(ray);
+
+    // We now have a result for closestResult, which is either the nearest hit, or no hit
+
+    // If an intersection occurred, continue recursion, otherwise return no colour contribution
+
+    if (closestResult.intersect){
+        if (remainingBounces > 0) {
+            // Ray newBounce 
+            // vec3 newRayResult = traceRay(newBounce)
+        }
+
+    }
+    else {
+        return {0.0f, 0.0f, 0.0f}
+    }
+    // 
+}
+
