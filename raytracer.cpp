@@ -369,10 +369,28 @@ vec3 computePhongModel(vec3 V, vec3 N, vec3 L) {
 }
 
 
-// Compute the lighting by firing shadow rays to all light sources,
+// Compute the colour contribution by firing shadow rays to all light sources,
 // if there is an unoccluded hit, then use computePhongModel to find their contribution
 vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal) {
+    for (int i = 0 ; i < lightSources.size() ; i++) {
+        // create a shadow ray from the surface point to the light source
+        vec3 lightDirection = lightSources[i].location - surfacePoint;
 
+        // compute t for when r(t) hits the light source
+        float tLight = lightDirection.norm();
+        Ray shadowRay{lightDirection, surfacePoint};
+        Ray::IntersectResult shadowIntersectResult = hitTestAllSpheres(shadowRay);
+
+        // If an intersection did not occur, then the light source is not occluded,
+        // light source contributes at this point
+        if (shadowIntersectResult.intersect) {
+            vec3 V = surfacePoint.unit() * -1.0f;
+            vec3 N = surfaceNormal;
+            vec3 L = lightDirection.unit();
+            vec3 phong = computePhongModel(V, N, L)
+        }
+
+    }
 }
 
 /**
