@@ -68,6 +68,7 @@ struct RGB {
     float r, g, b;
 };
 
+
 struct vec3 {
     float x,y,z;
 
@@ -104,7 +105,6 @@ struct vec3 {
         return vec3{x,y,z};
     }
 
-
     /**
      * @brief Dot product of this vector and parameter vector
      * 
@@ -114,7 +114,53 @@ struct vec3 {
     float dot(vec3 vector) {
         return x * vector.x + y * vector.y + z * vector.z;
     }
+
 };
+
+struct vec4 {
+    float x,y,z,w;
+    vec4 asPoint(vec3 pt){
+        x = pt.x;
+        y = pt.y;
+        z = pt.z;
+        w = 1.f;
+        return *this;
+    }
+    vec4 asVector(vec3 vec) {
+        x = vec.x;
+        y = vec.y;
+        z = vec.z;
+        w = 0.f;
+        return *this;
+    }
+    float dot(vec4 vector) {
+        return x * vector.x + y * vector.y + z * vector.z + w * vector.w;
+    }
+
+    vec3 asVec3() {
+        return vec3{x, y, z};
+    }
+
+    vec4 multiplyMatrix(float m[4][4]) {
+        vec4 mRow1{m[0][0], m[0][1], m[0][2], m[0][3]};
+        vec4 mRow2{m[1][0], m[1][1], m[1][2], m[1][3]};
+        vec4 mRow3{m[2][0], m[2][1], m[2][2], m[2][3]};
+        vec4 mRow4{m[3][0], m[3][1], m[3][2], m[3][3]};
+
+        return vec4{dot(mRow1), dot(mRow2), dot(mRow3), dot(mRow4)};
+    }
+
+    vec4 multiplyTranspose(float m[4][4]) {
+        vec4 mRow1{m[0][0], m[1][0], m[2][0], m[3][0]};
+        vec4 mRow2{m[0][1], m[1][1], m[2][1], m[3][1]};
+        vec4 mRow3{m[0][2], m[1][2], m[2][2], m[3][2]};
+        vec4 mRow4{m[0][3], m[1][3], m[2][3], m[3][3]};
+
+        return vec4{dot(mRow1), dot(mRow2), dot(mRow3), dot(mRow4)};
+    }
+};
+
+
 
 struct vec2 {
     float x,y;
@@ -129,7 +175,8 @@ struct Sphere {
     vec3 scale {1.0, 1.0, 1.0};
     vec3 position{0.0f, 0.0f, 0.0f};
     float radius = 1.f;
-    float matrix[4][4];
+    float matrix [4][4]{0};
+    float inverseMatrix[4][4]{0};
 
     // Respectively, the ambient, diffuse, specular and reflective coefficients
     float k_a, k_d, k_s, k_r;
@@ -138,14 +185,32 @@ struct Sphere {
 
     Sphere(){};
     Sphere(vec3 scale, vec3 posIn) {
+        inverseMatrix[0][0] = 1.f/scale.x;
+        inverseMatrix[1][1] = 1.f/scale.y;
+        inverseMatrix[2][2] = 1.f/scale.z;
+        inverseMatrix[0][3] = -posIn.x;
+        inverseMatrix[1][3] = -posIn.y;
+        inverseMatrix[2][3] = -posIn.z;
+        inverseMatrix[3][3] = 1.0;
+        position = posIn;
+    }
+
+    void computeInverse() {
         matrix[0][0] = scale.x;
         matrix[1][1] = scale.y;
         matrix[2][2] = scale.z;
-        matrix[0][3] = posIn.x;
-        matrix[1][3] = posIn.y;
-        matrix[2][3] = posIn.z;
+        matrix[0][3] = position.x;
+        matrix[1][3] = position.y;
+        matrix[2][3] = position.z;
         matrix[3][3] = 1.0;
-        position = posIn;
+
+        inverseMatrix[0][0] = 1.f/scale.x;
+        inverseMatrix[1][1] = 1.f/scale.y;
+        inverseMatrix[2][2] = 1.f/scale.z;
+        inverseMatrix[0][3] = -position.x;
+        inverseMatrix[1][3] = -position.y;
+        inverseMatrix[2][3] = -position.z;
+        inverseMatrix[3][3] = 1.0;
     }
 
     /**
@@ -200,7 +265,7 @@ public:
         Sphere intersectedSphere;
     };
 
-    IntersectResult testIntersection(Sphere sphere) {
+    IntersectResult testIntersection(Sphere sphere, bool ignoreCloseIntersections = false) {
         /* 
 
             Solve ray/sphere intersection quadratic:
@@ -208,12 +273,17 @@ public:
             b = 2dir(startingPoint - sphereCentre)
             c = |startingPoint - sphereCentre|^2 - radius^2
         */
+
+        vec4 transformed{};
+        vec3 directionTransformed = transformed.asVector(direction).multiplyMatrix(sphere.inverseMatrix).asVec3().unit();
+        vec3 startingPointTransformed = transformed.asPoint(startingPoint).multiplyMatrix(sphere.inverseMatrix).asVec3();
+        vec3 spherePositionTransformed = transformed.asPoint(sphere.position).multiplyMatrix(sphere.inverseMatrix).asVec3();
        
         // Unit direction vector
         float radius = 1.0f;
-        float a = direction.norm();
-        float b = ((startingPoint - sphere.position) * 2.f).dot(direction);
-        float c = powf((startingPoint - sphere.position).norm(), 2.f) - powf(radius, 2.f);
+        float a = directionTransformed.norm();
+        float b = ((startingPointTransformed - spherePositionTransformed) * 2.f).dot(directionTransformed);
+        float c = powf((startingPointTransformed - spherePositionTransformed).norm(), 2.f) - powf(radius, 2.f);
 
         float det = powf(b, 2.0) - 4 * a * c;
 
@@ -226,24 +296,26 @@ public:
             result.intersect = true;
             result.intersectedSphere = sphere;
 
+            float threshold = ignoreCloseIntersections ? 0.001f : 0.0f;
+
             // two t's greater than or equal to zero, choose closest 
-            if (root2 > 0.0f && root1 > 0.0f) {
+            if (root2 > threshold && root1 > threshold) {
                 if (root1 < root2) {
-                    result.closestIntersection = startingPoint + direction * root1;
+                    result.closestIntersection = startingPointTransformed + directionTransformed * root1;
                     result.closestTValue = root1;
                 }
                 else {
-                    result.closestIntersection = startingPoint + direction * root2;
+                    result.closestIntersection = startingPointTransformed + directionTransformed * root2;
                     result.closestTValue = root2;
                 }
                 
             }
-            else if (root2 > 0.0f) {
-                result.closestIntersection = startingPoint + direction * root2;
+            else if (root2 > threshold) {
+                result.closestIntersection = startingPointTransformed + directionTransformed * root2;
                 result.closestTValue = root2;
             }
-            else if (root1 > 0.0f) {
-                result.closestIntersection = startingPoint + direction * root1;
+            else if (root1 > threshold) {
+                result.closestIntersection = startingPointTransformed + directionTransformed * root1;
                 result.closestTValue = root1;
             }
             else {
@@ -335,7 +407,7 @@ Ray::IntersectResult hitTestAllSpheres(Ray ray) {
         // Setting this to 0 is okay as long as we factor in if an intersection has been found^
         float closestT = 0.0f;
 
-        Ray::IntersectResult result = ray.testIntersection(spheres[i]);
+        Ray::IntersectResult result = ray.testIntersection(spheres[i], true);
         if (result.intersect){
             // If there hasn't been an intersection yet (closestIntersectIndex == -1) or we found
             // a closer intersection (result.closestTValue < closestT)
@@ -357,12 +429,23 @@ Ray::IntersectResult hitTestAllSpheres(Ray ray) {
  * @param L 
  * @return vec3 
  */
-vec3 computePhongModel(vec3 V, vec3 N, vec3 L, vec3 R, Sphere sphere, LightSource lightSource) {
-    vec3 ambient = ambientIntensity.componentMultiply(sphere.objectColour) * sphere.k_a;
-    vec3 diffuse = lightSource.intensity.componentMultiply(sphere.objectColour) * sphere.k_d * N.dot(L);
-    vec3 specular = lightSource.intensity * sphere.k_s * powf(R.dot(V), sphere.specularExponent);
+vec3 computePhongDiffuseSpecular(vec3 V, vec3 N, vec3 L, vec3 R, Sphere sphere, LightSource lightSource) {
+    float dotProd = N.dot(L);
+    float specularDotProd = R.dot(V);
+    vec3 diffuse = (dotProd >= 0) ? lightSource.intensity.componentMultiply(sphere.objectColour) * sphere.k_d * dotProd : vec3{0.0f, 0.0f, 0.0f};
+    vec3 specular = specularDotProd >= 0 ? lightSource.intensity * sphere.k_s * powf(R.dot(V), sphere.specularExponent) : vec3{0.0f, 0.0f, 0.0f};
 
-    return ambient + diffuse + specular;
+    return diffuse + specular;
+}
+
+vec3 computePhongAmbient(Sphere sphere) {
+    return ambientIntensity.componentMultiply(sphere.objectColour) * sphere.k_a;
+}
+
+float clamp(float x, float min, float max) {
+    if (x > max) return max;
+    else if (x < min) return min;
+    return x;
 }
 
 
@@ -370,8 +453,11 @@ vec3 computePhongModel(vec3 V, vec3 N, vec3 L, vec3 R, Sphere sphere, LightSourc
 // if there is an unoccluded hit, then use computePhongModel to find their contribution
 vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
     vec3 pointLightContributions{0.0f, 0.0f, 0.0f};
+    vec3 ambient = computePhongAmbient(sphere);
     for (int i = 0 ; i < lightSources.size() ; i++) {
         // create a shadow ray from the surface point to the light source
+        vec4 transformed {};
+        vec3 surfacePointTransformed = transformed.asVector(surfacePoint).multiplyMatrix(sphere.inverseMatrix).asVec3();
         vec3 lightDirection = lightSources[i].location - surfacePoint;
 
         // compute t for when r(t) hits the light source
@@ -382,17 +468,18 @@ vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
         // If an intersection did not occur (!shadowIntersectResult.intersect), or if the 
         // nearest sphere intersection is further than the nearest light intersection then the light is
         // not occluded
+    
         if (!shadowIntersectResult.intersect || shadowIntersectResult.closestTValue > tLight) {
-            vec3 V = surfacePoint.unit() * -1.0f;
-            vec3 N = surfaceNormal;
+            vec3 V = transformed.asVector(surfacePoint.unit() * -1.0f).multiplyMatrix(sphere.inverseMatrix).asVec3();
+            vec3 N = surfaceNormal.unit();
             vec3 L = lightDirection.unit();
-            vec3 R = (N * (N.dot(L))) * 2.f - L;
-            vec3 phongNoReflection = computePhongModel(V, N, L, R, sphere, lightSources[i]);
+            vec3 R = (N * clamp(N.dot(L), 0.f, 1.f)) * 2.f - L;
+            vec3 phongNoReflection = computePhongDiffuseSpecular(V, N, L, R, sphere, lightSources[i]);
             pointLightContributions = pointLightContributions + phongNoReflection;
 
         }
     }
-    return pointLightContributions;
+    return pointLightContributions + ambient;
 }
 
 /**
@@ -417,9 +504,10 @@ vec3 traceRay(Ray ray, int remainingBounces) {
         vec3 reflectedColour{0.f, 0.f, 0.f};
         if (remainingBounces > 0) {
             Ray newRay {closestResult.intersectionNormal, closestResult.closestIntersection};
-            //reflectedColour = traceRay(newRay, remainingBounces - 1) * closestResult.intersectedSphere.k_r;
+            reflectedColour = traceRay(newRay, remainingBounces - 1) * closestResult.intersectedSphere.k_r;
         }
-        return  localColour + reflectedColour;
+        return localColour + reflectedColour;
+        return localColour.clampAll(0.f, 1.f);
 
     }
     else {
@@ -431,7 +519,7 @@ vec3 traceRay(Ray ray, int remainingBounces) {
 
 int main(int argc,  char **argv) {
 
-    std::ifstream file("testAmbient.txt");
+    std::ifstream file("testDiffuse.txt");
 
     std::string line = "";
 
@@ -451,6 +539,7 @@ int main(int argc,  char **argv) {
             file >> newSphere.scale.x >> newSphere.scale.y >> newSphere.scale.z;
             file >> newSphere.objectColour.x >> newSphere.objectColour.y >> newSphere.objectColour.z;
             file >> newSphere.k_a >> newSphere.k_d >> newSphere.k_s >> newSphere.k_r >> newSphere.specularExponent;
+            newSphere.computeInverse();
             spheres.push_back(newSphere);
         }
         else if (line == "LIGHT") {
