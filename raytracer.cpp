@@ -65,18 +65,18 @@ void save_imageP3(int Width, int Height, char* fname,unsigned char* pixels) {
 const int bounceCount = 3;
 
 struct RGB {
-    float r, g, b;
+    double r, g, b;
 };
 
 
 struct vec3 {
-    float x,y,z;
+    double x,y,z;
 
-    float norm () {
+    double norm () {
         return sqrtf(powf(x, 2.0f) + powf(y, 2.0) + powf(z, 2.0f));
     }
 
-    vec3 operator*(float scalar) {
+    vec3 operator*(double scalar) {
         return vec3{x * scalar, y*scalar, z * scalar};
     }
 
@@ -89,7 +89,7 @@ struct vec3 {
     }
 
     vec3 unit() {
-        float len = norm();
+        double len = norm();
         return vec3{x/len, y/len, z/len};
     }
 
@@ -98,7 +98,7 @@ struct vec3 {
        return vec3{x * vector.x, y * vector.y, z * vector.z};
     }
 
-    vec3 clampAll(float min, float max) {
+    vec3 clampAll(double min, double max) {
         if (x > max) x = max; else if (x < min) x = min;
         if (y > max) y = max; else if (y < min) y = min;
         if (z > max) z = max; else if (z < min) z = min;
@@ -109,16 +109,16 @@ struct vec3 {
      * @brief Dot product of this vector and parameter vector
      * 
      * @param vector 
-     * @return float 
+     * @return double 
      */
-    float dot(vec3 vector) {
+    double dot(vec3 vector) {
         return x * vector.x + y * vector.y + z * vector.z;
     }
 
 };
 
 struct vec4 {
-    float x,y,z,w;
+    double x,y,z,w;
     vec4 asPoint(vec3 pt){
         x = pt.x;
         y = pt.y;
@@ -133,7 +133,7 @@ struct vec4 {
         w = 0.f;
         return *this;
     }
-    float dot(vec4 vector) {
+    double dot(vec4 vector) {
         return x * vector.x + y * vector.y + z * vector.z + w * vector.w;
     }
 
@@ -141,7 +141,7 @@ struct vec4 {
         return vec3{x, y, z};
     }
 
-    vec4 multiplyMatrix(float m[4][4]) {
+    vec4 multiplyMatrix(double m[4][4]) {
         vec4 mRow1{m[0][0], m[0][1], m[0][2], m[0][3]};
         vec4 mRow2{m[1][0], m[1][1], m[1][2], m[1][3]};
         vec4 mRow3{m[2][0], m[2][1], m[2][2], m[2][3]};
@@ -150,7 +150,7 @@ struct vec4 {
         return vec4{dot(mRow1), dot(mRow2), dot(mRow3), dot(mRow4)};
     }
 
-    vec4 multiplyTranspose(float m[4][4]) {
+    vec4 multiplyTranspose(double m[4][4]) {
         vec4 mRow1{m[0][0], m[1][0], m[2][0], m[3][0]};
         vec4 mRow2{m[0][1], m[1][1], m[2][1], m[3][1]};
         vec4 mRow3{m[0][2], m[1][2], m[2][2], m[3][2]};
@@ -163,7 +163,7 @@ struct vec4 {
 
 
 struct vec2 {
-    float x,y;
+    double x,y;
 };
 
 vec3 ambientIntensity = {0.2f, 0.2f, 0.2f};
@@ -174,14 +174,14 @@ struct Sphere {
     std::string name;
     vec3 scale {1.0, 1.0, 1.0};
     vec3 position{0.0f, 0.0f, 0.0f};
-    float radius = 1.f;
-    float matrix [4][4]{0};
-    float inverseMatrix[4][4]{0};
+    double radius = 1.f;
+    double matrix [4][4]{0};
+    double inverseMatrix[4][4]{0};
 
     // Respectively, the ambient, diffuse, specular and reflective coefficients
-    float k_a, k_d, k_s, k_r;
+    double k_a, k_d, k_s, k_r;
     vec3 objectColour;
-    float specularExponent;
+    double specularExponent;
 
     Sphere(){};
     Sphere(vec3 scale, vec3 posIn) {
@@ -207,9 +207,9 @@ struct Sphere {
         inverseMatrix[0][0] = 1.f/scale.x;
         inverseMatrix[1][1] = 1.f/scale.y;
         inverseMatrix[2][2] = 1.f/scale.z;
-        inverseMatrix[0][3] = -position.x;
-        inverseMatrix[1][3] = -position.y;
-        inverseMatrix[2][3] = -position.z;
+        inverseMatrix[0][3] = -(position.x / scale.x);
+        inverseMatrix[1][3] = -position.y / scale.y;
+        inverseMatrix[2][3] = -position.z / scale.z;
         inverseMatrix[3][3] = 1.0;
     }
 
@@ -220,8 +220,8 @@ struct Sphere {
      * @param intersectWS 
      * @return vec3 
      */
-    vec3 getNormalFromIntersect(vec3 intersectWS) {
-        return (intersectWS - position).unit();
+    vec3 getNormalFromIntersect(vec3 intersectLocalSpace) {
+        return intersectLocalSpace.unit();
     }
 
 };
@@ -258,7 +258,7 @@ public:
         vec3 closestIntersection;
         // The t value r(t) for the nearest intersection. Used for
         // depth comparisons 
-        float closestTValue;
+        double closestTValue;
         // Intersection normal in world space
         vec3 intersectionNormal;
         
@@ -277,26 +277,26 @@ public:
         vec4 transformed{};
         vec3 directionTransformed = transformed.asVector(direction).multiplyMatrix(sphere.inverseMatrix).asVec3().unit();
         vec3 startingPointTransformed = transformed.asPoint(startingPoint).multiplyMatrix(sphere.inverseMatrix).asVec3();
-        vec3 spherePositionTransformed = transformed.asPoint(sphere.position).multiplyMatrix(sphere.inverseMatrix).asVec3();
+        vec3 spherePositionTransformed = {0.f, 0.f, 0.f};
        
         // Unit direction vector
-        float radius = 1.0f;
-        float a = directionTransformed.norm();
-        float b = ((startingPointTransformed - spherePositionTransformed) * 2.f).dot(directionTransformed);
-        float c = powf((startingPointTransformed - spherePositionTransformed).norm(), 2.f) - powf(radius, 2.f);
+        double radius = 1.0f;
+        double a = 1.f;
+        double b = ((startingPointTransformed - spherePositionTransformed) * 2.f).dot(directionTransformed);
+        double c = powf((startingPointTransformed - spherePositionTransformed).norm(), 2.f) - powf(radius, 2.f);
 
-        float det = powf(b, 2.0) - 4 * a * c;
+        double det = powf(b, 2.0) - 4 * a * c;
 
         IntersectResult result{};
         if (det >= 0.0f) {
-            float root1 = (-b + sqrtf(det)) / (2.0 * a);
-            float root2 = (-b - sqrtf(det)) / (2.0 * a);
+            double root1 = (-b + sqrtf(det)) / (2.0 * a);
+            double root2 = (-b - sqrtf(det)) / (2.0 * a);
 
             // Prematurely set to true, only set to false if both roots are negative (ray intersects backwards only)
             result.intersect = true;
             result.intersectedSphere = sphere;
 
-            float threshold = ignoreCloseIntersections ? 0.001f : 0.0f;
+            double threshold = ignoreCloseIntersections ? 0.001f : 0.0f;
 
             // two t's greater than or equal to zero, choose closest 
             if (root2 > threshold && root1 > threshold) {
@@ -324,7 +324,8 @@ public:
 
             // If an intersection occurred, determine the normal of the sphere
             if (result.intersect) {
-                result.intersectionNormal = sphere.getNormalFromIntersect(result.closestIntersection);
+                result.intersectionNormal = transformed.asVector(sphere.getNormalFromIntersect(result.closestIntersection)).multiplyTranspose(sphere.inverseMatrix).asVec3().unit();
+                result.closestIntersection = transformed.asPoint(result.closestIntersection).multiplyMatrix(sphere.matrix).asVec3();
             }
         }
 
@@ -351,7 +352,7 @@ void setPixel(unsigned char* image, int x, int y, vec3 colour, int width, int he
     image[pixelIndex + 2] = colour.z * 255.0;
 }
 
-float near = 1, left = 1, right = -1, bottom = -1, top = 1;
+double near = 1, left = 1, right = -1, bottom = -1, top = 1;
 vec2 res{512, 512};
 
 // For this project, the camera is fixed at the origin
@@ -376,13 +377,13 @@ Ray pixelToWorldRay(vec2 pixel) {
     // Determine the centre of the pixel in view space:
 
     // Confusingly, y-axis is the horizontal (pos y left), and x-axis (pos x up) is the vertical
-    float pixDX = (right - left) / res.x;
-    float pixDY = (top - bottom) / res.y;
+    double pixDX = (right - left) / res.x;
+    double pixDY = (top - bottom) / res.y;
 
     // We subtract half the length/height of the pixel to get to the centre
-    float halfPixDY = pixDY / 2.f, halfPixDX = pixDX / 2.f;
+    double halfPixDY = pixDY / 2.f, halfPixDX = pixDX / 2.f;
 
-    vec3 pixelCentre{left + (pixDX * pixel.x) - halfPixDX, top - (pixDY * pixel.y) - halfPixDY, -near};
+    vec3 pixelCentre{left + (pixDX * pixel.x), top - (pixDY * pixel.y), -near};
 
     return Ray(pixelCentre - cameraOrigin, cameraOrigin);
 }
@@ -401,19 +402,19 @@ std::vector<LightSource> lightSources = {};
 Ray::IntersectResult hitTestAllSpheres(Ray ray) {
     Ray::IntersectResult closestResult {};
     // Determine ray intersection result
+    // Setting this to 0 is okay as long as we factor in if an intersection has been found^
+    double closestIntersectDistance = 0.0;
+    int closestIntersectIndex = -1;
     for (int i = 0 ; i < spheres.size() ; i++) {
-        int closestIntersectIndex = -1;
-
-        // Setting this to 0 is okay as long as we factor in if an intersection has been found^
-        float closestT = 0.0f;
 
         Ray::IntersectResult result = ray.testIntersection(spheres[i], true);
         if (result.intersect){
+            double intersectDistance = (result.closestIntersection - ray.startingPoint).norm();
             // If there hasn't been an intersection yet (closestIntersectIndex == -1) or we found
             // a closer intersection (result.closestTValue < closestT)
-            if (closestIntersectIndex == -1 || result.closestTValue < closestT) {
+            if (closestIntersectIndex == -1 || intersectDistance < closestIntersectDistance) {
                 closestIntersectIndex = i;
-                closestT = result.closestTValue;
+                closestIntersectDistance = intersectDistance;
                 closestResult = result;
             }
         }
@@ -430,8 +431,8 @@ Ray::IntersectResult hitTestAllSpheres(Ray ray) {
  * @return vec3 
  */
 vec3 computePhongDiffuseSpecular(vec3 V, vec3 N, vec3 L, vec3 R, Sphere sphere, LightSource lightSource) {
-    float dotProd = N.dot(L);
-    float specularDotProd = R.dot(V);
+    double dotProd = N.dot(L);
+    double specularDotProd = R.dot(V);
     vec3 diffuse = (dotProd >= 0) ? lightSource.intensity.componentMultiply(sphere.objectColour) * sphere.k_d * dotProd : vec3{0.0f, 0.0f, 0.0f};
     vec3 specular = specularDotProd >= 0 ? lightSource.intensity * sphere.k_s * powf(R.dot(V), sphere.specularExponent) : vec3{0.0f, 0.0f, 0.0f};
 
@@ -442,7 +443,7 @@ vec3 computePhongAmbient(Sphere sphere) {
     return ambientIntensity.componentMultiply(sphere.objectColour) * sphere.k_a;
 }
 
-float clamp(float x, float min, float max) {
+double clamp(double x, double min, double max) {
     if (x > max) return max;
     else if (x < min) return min;
     return x;
@@ -457,12 +458,13 @@ vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
     for (int i = 0 ; i < lightSources.size() ; i++) {
         // create a shadow ray from the surface point to the light source
         vec4 transformed {};
-        vec3 surfacePointTransformed = transformed.asVector(surfacePoint).multiplyMatrix(sphere.inverseMatrix).asVec3();
-        vec3 lightDirection = lightSources[i].location - surfacePoint;
+        vec3 surfacePointTransformed = surfacePoint;
+        vec3 surfaceNormalTransformed = surfaceNormal;
+        vec3 lightDirection = lightSources[i].location - surfacePointTransformed;
 
         // compute t for when r(t) hits the light source
-        float tLight = lightDirection.norm();
-        Ray shadowRay{lightDirection, surfacePoint};
+        double tLight = lightDirection.norm();
+        Ray shadowRay{lightDirection, surfacePointTransformed};
         Ray::IntersectResult shadowIntersectResult = hitTestAllSpheres(shadowRay);
 
         // If an intersection did not occur (!shadowIntersectResult.intersect), or if the 
@@ -470,8 +472,8 @@ vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
         // not occluded
     
         if (!shadowIntersectResult.intersect || shadowIntersectResult.closestTValue > tLight) {
-            vec3 V = transformed.asVector(surfacePoint.unit() * -1.0f).multiplyMatrix(sphere.inverseMatrix).asVec3();
-            vec3 N = surfaceNormal.unit();
+            vec3 V = surfacePointTransformed.unit() * -1.f;
+            vec3 N = surfaceNormalTransformed.unit();
             vec3 L = lightDirection.unit();
             vec3 R = (N * clamp(N.dot(L), 0.f, 1.f)) * 2.f - L;
             vec3 phongNoReflection = computePhongDiffuseSpecular(V, N, L, R, sphere, lightSources[i]);
@@ -479,7 +481,7 @@ vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
 
         }
     }
-    return pointLightContributions + ambient;
+    return (pointLightContributions + ambient).clampAll(0.f, 1.f);
 }
 
 /**
@@ -511,15 +513,14 @@ vec3 traceRay(Ray ray, int remainingBounces) {
 
     }
     else {
-        return remainingBounces == 3? backgroundColour : vec3{0.0f, 0.0f, 0.0f};
+        return remainingBounces == bounceCount? backgroundColour : vec3{0.0f, 0.0f, 0.0f};
     }
-    // 
 }
 
 
 int main(int argc,  char **argv) {
 
-    std::ifstream file("testDiffuse.txt");
+    std::ifstream file("testSpecular.txt");
 
     std::string line = "";
 
@@ -562,13 +563,19 @@ int main(int argc,  char **argv) {
     pixels = new unsigned char [3*Width*Height]{0};
 
     
-    for (float y = 0 ; y < res.x ; y ++) {
-        for (float x = 0 ; x < res.y ; x++) {
+    for (double y = 0 ; y < res.x ; y ++) {
+        for (double x = 0 ; x < res.y ; x++) {
             Ray worldRay = pixelToWorldRay({x,y});
             setPixel(pixels, x, y, traceRay(worldRay, bounceCount), res.x, res.y);
         }
         int i = y;
     }
+
+    vec3 normal{sqrtf(3.0f)/2.0f,0.5f, 0.f};
+    vec3 point{sqrtf(3.0f)/2.0f,0.5f, 0.f};
+    vec4 transform{};
+    vec3 transformedPt = transform.asPoint(point).multiplyMatrix(spheres[1].matrix).asVec3();
+    vec3 transformedNormal = transform.asVector(normal).multiplyTranspose(spheres[1].inverseMatrix).asVec3().unit();
 
     save_imageP3(Width, Height, fname3, pixels);
 	save_imageP6(Width, Height, fname6, pixels);
