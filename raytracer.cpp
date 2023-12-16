@@ -5,6 +5,7 @@
 #include <vector>
 
 
+// set initial values
 double near = 1, left = 1, right = -1, bottom = -1, top = 1;
 
 // Output in P6 format, a binary file containing:
@@ -12,16 +13,11 @@ double near = 1, left = 1, right = -1, bottom = -1, top = 1;
 // ncolumns nrows
 // Max colour value
 // colours in binary format thus unreadable
-void save_imageP6(int Width, int Height, char* fname,unsigned char* pixels) {
+void save_imageP6(int Width, int Height, const char* fname,unsigned char* pixels) {
   FILE *fp;
   const int maxVal=255; 
   
-  printf("Saving image %s: %d x %d\n", fname,Width,Height);
   fp = fopen(fname,"wb");
-  if (!fp) {
-        printf("Unable to open file '%s'\n",fname);
-        return;
-  }
   fprintf(fp, "P6\n");
   fprintf(fp, "%d %d\n", Width, Height);
   fprintf(fp, "%d\n", maxVal);
@@ -348,7 +344,7 @@ public:
                 if (result.closestIntersection.z > -near && furthestIntersectionWS.z > -near) {
                     result.intersect = false;
                 } 
-                else if (result.closestIntersection.z > -near) {
+                else if (result.closestIntersection.z >= -near) {
                     result.closestIntersection = furthestIntersectionWS;
                     result.intersectionNormal = transformed.asVector(sphere.getNormalFromIntersect(furthestIntersectionLS)).multiplyTranspose(sphere.inverseMatrix).asVec3().unit() * -1.f;
                 }
@@ -559,9 +555,12 @@ vec3 traceRay(Ray ray, int remainingBounces, bool initRay = true) {
 
 int main(int argc,  char **argv) {
 
-    std::ifstream file("testSample.txt");
+    std::ifstream file;
+    file.open(argv[1]);
 
     std::string line = "";
+
+    std::string fileName = "";
 
     while(file >> line) {
         if (line == "NEAR") file >> near;
@@ -589,6 +588,10 @@ int main(int argc,  char **argv) {
             file >> newLight.intensity.x >> newLight.intensity.y >> newLight.intensity.z;
             lightSources.push_back(newLight);
         }
+
+        else if (line == "OUTPUT") {
+            file >> fileName;
+        }
     }
 
 
@@ -610,8 +613,7 @@ int main(int argc,  char **argv) {
         int i = y;
     }
 
-    save_imageP3(Width, Height, fname3, pixels);
-	save_imageP6(Width, Height, fname6, pixels);
+	save_imageP6(Width, Height, fileName.data(), pixels);
 
 
     return 0;
