@@ -4,6 +4,9 @@
 #include <fstream>
 #include <vector>
 
+
+double near = 1, left = 1, right = -1, bottom = -1, top = 1;
+
 // Output in P6 format, a binary file containing:
 // P6
 // ncolumns nrows
@@ -166,6 +169,7 @@ struct vec2 {
     double x,y;
 };
 
+vec2 res{512, 512};
 vec3 ambientIntensity = {0.2f, 0.2f, 0.2f};
 vec3 backgroundColour = {0.3f, 0.3f, 0.3f};
 
@@ -259,13 +263,18 @@ public:
         // The t value r(t) for the nearest intersection. Used for
         // depth comparisons 
         double closestTValue;
+
         // Intersection normal in world space
+        // The intersection may be on the inside of the sphere in which case
+        // the ray is bouncing around inside of the sphere
         vec3 intersectionNormal;
         
         Sphere intersectedSphere;
+
+
     };
 
-    IntersectResult testIntersection(Sphere sphere, bool ignoreCloseIntersections = false) {
+    IntersectResult testIntersection(Sphere sphere, bool ignoreCloseIntersections = false, bool initialRay=false) {
         /* 
 
             Solve ray/sphere intersection quadratic:
@@ -297,25 +306,31 @@ public:
             result.intersectedSphere = sphere;
 
             double threshold = ignoreCloseIntersections ? 0.001f : 0.0f;
+            vec3 furthestIntersectionLS;
+            vec3 furthestIntersectionWS;
 
             // two t's greater than or equal to zero, choose closest 
             if (root2 > threshold && root1 > threshold) {
                 if (root1 < root2) {
                     result.closestIntersection = startingPointTransformed + directionTransformed * root1;
+                    furthestIntersectionLS = startingPointTransformed + directionTransformed * root2;
                     result.closestTValue = root1;
                 }
                 else {
                     result.closestIntersection = startingPointTransformed + directionTransformed * root2;
+                    furthestIntersectionLS = startingPointTransformed + directionTransformed * root1;
                     result.closestTValue = root2;
                 }
                 
             }
             else if (root2 > threshold) {
                 result.closestIntersection = startingPointTransformed + directionTransformed * root2;
+                furthestIntersectionLS = startingPointTransformed + directionTransformed * root2;
                 result.closestTValue = root2;
             }
             else if (root1 > threshold) {
                 result.closestIntersection = startingPointTransformed + directionTransformed * root1;
+                furthestIntersectionLS = startingPointTransformed + directionTransformed * root1;
                 result.closestTValue = root1;
             }
             else {
@@ -326,7 +341,19 @@ public:
             if (result.intersect) {
                 result.intersectionNormal = transformed.asVector(sphere.getNormalFromIntersect(result.closestIntersection)).multiplyTranspose(sphere.inverseMatrix).asVec3().unit();
                 result.closestIntersection = transformed.asPoint(result.closestIntersection).multiplyMatrix(sphere.matrix).asVec3();
+                furthestIntersectionWS = transformed.asPoint(furthestIntersectionLS).multiplyMatrix(sphere.matrix).asVec3();
             }
+
+            if (initialRay) {
+                if (result.closestIntersection.z > -near && furthestIntersectionWS.z > -near) {
+                    result.intersect = false;
+                } 
+                else if (result.closestIntersection.z > -near) {
+                    result.closestIntersection = furthestIntersectionWS;
+                    result.intersectionNormal = transformed.asVector(sphere.getNormalFromIntersect(furthestIntersectionLS)).multiplyTranspose(sphere.inverseMatrix).asVec3().unit() * -1.f;
+                }
+            }
+
         }
 
         return result;
@@ -351,9 +378,6 @@ void setPixel(unsigned char* image, int x, int y, vec3 colour, int width, int he
     image[pixelIndex + 1] = colour.y * 255.0;
     image[pixelIndex + 2] = colour.z * 255.0;
 }
-
-double near = 1, left = 1, right = -1, bottom = -1, top = 1;
-vec2 res{512, 512};
 
 // For this project, the camera is fixed at the origin
 // and looking down the -z axis
@@ -399,7 +423,7 @@ std::vector<LightSource> lightSources = {};
  * @param ray 
  * @return Ray::IntersectResult 
  */
-Ray::IntersectResult hitTestAllSpheres(Ray ray) {
+Ray::IntersectResult hitTestAllSpheres(Ray ray, bool initRay) {
     Ray::IntersectResult closestResult {};
     // Determine ray intersection result
     // Setting this to 0 is okay as long as we factor in if an intersection has been found^
@@ -407,7 +431,8 @@ Ray::IntersectResult hitTestAllSpheres(Ray ray) {
     int closestIntersectIndex = -1;
     for (int i = 0 ; i < spheres.size() ; i++) {
 
-        Ray::IntersectResult result = ray.testIntersection(spheres[i], true);
+        Ray::IntersectResult result = ray.testIntersection(spheres[i], true, initRay);
+
         if (result.intersect){
             double intersectDistance = (result.closestIntersection - ray.startingPoint).norm();
             // If there hasn't been an intersection yet (closestIntersectIndex == -1) or we found
@@ -452,33 +477,46 @@ double clamp(double x, double min, double max) {
 
 // Compute the colour contribution by firing shadow rays to all light sources,
 // if there is an unoccluded hit, then use computePhongModel to find their contribution
-vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
+// inSphere refers to if the hit was on the inside of the sphere, in which case only consider lights
+// in the sphere
+vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere, bool inSphere) {
     vec3 pointLightContributions{0.0f, 0.0f, 0.0f};
     vec3 ambient = computePhongAmbient(sphere);
+
+    if (inSphere == false) {
+        int i = 1;
+    }
+
     for (int i = 0 ; i < lightSources.size() ; i++) {
-        // create a shadow ray from the surface point to the light source
-        vec4 transformed {};
-        vec3 surfacePointTransformed = surfacePoint;
-        vec3 surfaceNormalTransformed = surfaceNormal;
-        vec3 lightDirection = lightSources[i].location - surfacePointTransformed;
+        Ray inSphereCheckRay {lightSources[i].location - sphere.position, sphere.position};
 
-        // compute t for when r(t) hits the light source
-        double tLight = lightDirection.norm();
-        Ray shadowRay{lightDirection, surfacePointTransformed};
-        Ray::IntersectResult shadowIntersectResult = hitTestAllSpheres(shadowRay);
+        // We determine if the light and intersection point are both in the sphere or both outside of it
+        Ray::IntersectResult lightCheckResult = inSphereCheckRay.testIntersection(sphere);
+        if ((inSphere && !lightCheckResult.intersect) || (!inSphere && lightCheckResult.intersect)){
+            // create a shadow ray from the surface point to the light source
+            vec4 transformed {};
+            vec3 surfacePointTransformed = surfacePoint;
+            vec3 surfaceNormalTransformed = surfaceNormal;
+            vec3 lightDirection = lightSources[i].location - surfacePointTransformed;
 
-        // If an intersection did not occur (!shadowIntersectResult.intersect), or if the 
-        // nearest sphere intersection is further than the nearest light intersection then the light is
-        // not occluded
-    
-        if (!shadowIntersectResult.intersect || shadowIntersectResult.closestTValue > tLight) {
-            vec3 V = surfacePointTransformed.unit() * -1.f;
-            vec3 N = surfaceNormalTransformed.unit();
-            vec3 L = lightDirection.unit();
-            vec3 R = (N * clamp(N.dot(L), 0.f, 1.f)) * 2.f - L;
-            vec3 phongNoReflection = computePhongDiffuseSpecular(V, N, L, R, sphere, lightSources[i]);
-            pointLightContributions = pointLightContributions + phongNoReflection;
+            // compute t for when r(t) hits the light source
+            double tLight = lightDirection.norm();
+            Ray shadowRay{lightDirection, surfacePointTransformed};
+            Ray::IntersectResult shadowIntersectResult = hitTestAllSpheres(shadowRay, false);
 
+            // If an intersection did not occur (!shadowIntersectResult.intersect), or if the 
+            // nearest sphere intersection is further than the nearest light intersection then the light is
+            // not occluded
+        
+            if (!shadowIntersectResult.intersect || shadowIntersectResult.closestTValue > tLight) {
+                vec3 V = surfacePointTransformed.unit() * -1.f;
+                vec3 N = surfaceNormalTransformed.unit();
+                vec3 L = lightDirection.unit();
+                vec3 R = (N * clamp(N.dot(L), 0.f, 1.f)) * 2.f - L;
+                vec3 phongNoReflection = computePhongDiffuseSpecular(V, N, L, R, sphere, lightSources[i]);
+                pointLightContributions = pointLightContributions + phongNoReflection;
+
+            }
         }
     }
     return (pointLightContributions + ambient).clampAll(0.f, 1.f);
@@ -492,21 +530,22 @@ vec3 computeLighting(vec3 surfacePoint, vec3 surfaceNormal, Sphere sphere) {
  * @param remainingBounces The number of bounces remaining
  * @return The reflected colour from the traced ray 
  */
-vec3 traceRay(Ray ray, int remainingBounces) {
+vec3 traceRay(Ray ray, int remainingBounces, bool initRay = true) {
     // Each bounce triggers a recursive call
 
-    Ray::IntersectResult closestResult = hitTestAllSpheres(ray);
+    Ray::IntersectResult closestResult = hitTestAllSpheres(ray, initRay);
 
     // We now have a result for closestResult, which is either the nearest hit, or no hit
 
     // If an intersection occurred, continue recursion, otherwise return no colour contribution
 
     if (closestResult.intersect){
-        vec3 localColour = computeLighting(closestResult.closestIntersection, closestResult.intersectionNormal, closestResult.intersectedSphere);
+        bool inSphere = closestResult.intersectionNormal.dot(closestResult.closestIntersection - closestResult.intersectedSphere.position) < 0.f;
+        vec3 localColour = computeLighting(closestResult.closestIntersection, closestResult.intersectionNormal, closestResult.intersectedSphere, inSphere);
         vec3 reflectedColour{0.f, 0.f, 0.f};
         if (remainingBounces > 0) {
             Ray newRay {closestResult.intersectionNormal, closestResult.closestIntersection};
-            reflectedColour = traceRay(newRay, remainingBounces - 1) * closestResult.intersectedSphere.k_r;
+            reflectedColour = traceRay(newRay, remainingBounces - 1, false) * closestResult.intersectedSphere.k_r;
         }
         return localColour + reflectedColour;
         return localColour.clampAll(0.f, 1.f);
@@ -520,7 +559,7 @@ vec3 traceRay(Ray ray, int remainingBounces) {
 
 int main(int argc,  char **argv) {
 
-    std::ifstream file("testSpecular.txt");
+    std::ifstream file("testSample.txt");
 
     std::string line = "";
 
@@ -570,12 +609,6 @@ int main(int argc,  char **argv) {
         }
         int i = y;
     }
-
-    vec3 normal{sqrtf(3.0f)/2.0f,0.5f, 0.f};
-    vec3 point{sqrtf(3.0f)/2.0f,0.5f, 0.f};
-    vec4 transform{};
-    vec3 transformedPt = transform.asPoint(point).multiplyMatrix(spheres[1].matrix).asVec3();
-    vec3 transformedNormal = transform.asVector(normal).multiplyTranspose(spheres[1].inverseMatrix).asVec3().unit();
 
     save_imageP3(Width, Height, fname3, pixels);
 	save_imageP6(Width, Height, fname6, pixels);
